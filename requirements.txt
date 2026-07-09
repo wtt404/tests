@@ -1,0 +1,7 @@
+discord.py
+google-genai
+python-dotenv
+lingua-language-detector
+playwright
+deep-translator
+aiohttp
