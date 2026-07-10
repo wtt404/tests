@@ -1,129 +1,82 @@
-from models.post import Post, Media
-from services.browser import new_page
-from services.fetchers.base import Fetcher
-import json
 import re
+import aiohttp
+from bs4 import BeautifulSoup
+
+from models.post import Post, Media
+from services.fetchers.base import Fetcher
+
+URL_PATTERN = re.compile(r"t\.me/(?:s/)?([A-Za-z0-9_]+)/(\d+)")
+BG_IMAGE_PATTERN = re.compile(r"background-image:url\('([^']+)'\)")
 
 
-class XFetcher(Fetcher):
+class TelegramFetcher(Fetcher):
     async def fetch(self, url: str) -> Post:
+        match = URL_PATTERN.search(url)
 
-        page = await new_page()
-        captured_video_urls = set()
-
-        def _capture_video(response):
-            resp_url = response.url
-            if "video.twimg.com" in resp_url and (".m3u8" in resp_url or ".mp4" in resp_url):
-                captured_video_urls.add(resp_url)
-
-        page.on("response", _capture_video)
-
-        try:
-            print("FETCH START", flush=True)
-
-            response = await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=30000
-            )
-            print("Navigation finished", flush=True)
-
-            print(f"Status: {response.status if response else 'None'}", flush=True)
-
-            print("Current URL:", page.url, flush=True)
-
-            print("Title:", await page.title(), flush=True)
-
-            # Multi-photo galleries render a beat after domcontentloaded fires;
-            # wait for at least one media element, then give the rest of the
-            # gallery a moment to finish attaching before we scrape the HTML.
-            try:
-                await page.wait_for_selector(
-                    '[data-testid="tweetPhoto"], video',
-                    timeout=8000
-                )
-                await page.wait_for_timeout(750)
-            except Exception:
-                pass  # text-only tweet, nothing to wait for
-
-            # X frequently doesn't fetch the actual video manifest until
-            # playback starts, so it's often just not present in the static
-            # HTML at all. Nudge the player and give the network request a
-            # moment to fire; we're listening for it via page.on("response").
-            try:
-                video_el = page.locator("video").first
-                if await video_el.count() > 0:
-                    await video_el.click(timeout=3000)
-                    await page.wait_for_timeout(1500)
-            except Exception:
-                pass
-
-            scripts = await page.locator('script[type="application/ld+json"]').all_inner_texts()
-
-            data = None
-
-            for script in scripts:
-                obj = json.loads(script)
-          
-                if obj.get("@type") == "SocialMediaPosting":
-                    data = obj
-                    break
-
-            if data is None:
-                raise RuntimeError("SocialMediaPosting not found")
-
-            text = data["articleBody"]
-            html = await page.content()
-            video_urls = set(re.findall(
-                r'https://video\.twimg\.com[^"\']+',
-                html
-            ))
-            video_urls |= captured_video_urls
-
-            print("Video playlists:", video_urls, flush=True)
-  
-            seen = set()
-            media = []
-
-            for media_url in re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', html):
-                media_url = media_url.replace("&amp;", "&")
-
-                if "?format=webp" in media_url:
-                    continue
-
-                if media_url in seen:
-                    continue
-       
-                seen.add(media_url)
-
-                media.append(
-                    Media(
-                        url=media_url,
-                        type="image"
-                    )
-                )
-
-            for video_url in video_urls:
-                video_url = video_url.replace("&amp;", "&")
-
-                if video_url in seen:
-                    continue 
-
-                seen.add(video_url)
-
-                media.append(
-                    Media(
-                        url=video_url,
-                        type="video"
-                    )
-                )
-
-            return Post(
-                platform="x",
-                text=text,
-                media=media
+        if not match:
+            raise RuntimeError(
+                "Unsupported Telegram URL (private/invite-only channels aren't supported)"
             )
 
-        finally:
-            page.remove_listener("response", _capture_video)
-            await page.close()
+        channel, msg_id = match.groups()
+        embed_url = f"https://t.me/{channel}/{msg_id}?embed=1&mode=tme"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(embed_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"Telegram returned status {resp.status}")
+
+                body = await resp.text()
+
+        if "tgme_widget_message" not in body:
+            raise RuntimeError("Telegram post not found or channel is private")
+
+        soup = BeautifulSoup(body, "html.parser")
+
+        text_el = soup.select_one(".tgme_widget_message_text")
+
+        text = ""
+        if text_el:
+            for br in text_el.find_all("br"):
+                br.replace_with("\n")
+            text = text_el.get_text().strip()
+
+        seen = set()
+        media = []
+
+        # Photos are rendered as an element with a background-image inline
+        # style. Match on "class contains" rather than an exact class
+        # attribute, since Telegram often appends extra classes.
+        for el in soup.select('[class*="tgme_widget_message_photo_wrap"]'):
+            style = el.get("style", "")
+            m = BG_IMAGE_PATTERN.search(style)
+
+            if not m:
+                continue
+
+            photo_url = m.group(1).replace("&amp;", "&")
+
+            if photo_url in seen:
+                continue
+
+            seen.add(photo_url)
+            media.append(Media(url=photo_url, type="image"))
+
+        # Videos: only recoverable when Telegram's lightweight preview embeds
+        # a direct <video src>. Larger/longer videos are intentionally not
+        # embedded by Telegram here and can't be recovered without the
+        # Telegram API/app - those will just come through with no video media.
+        for el in soup.select("video"):
+            src = el.get("src")
+
+            if not src:
+                source = el.find("source")
+                src = source.get("src") if source else None
+
+            if not src or src in seen:
+                continue
+
+            seen.add(src)
+            media.append(Media(url=src.replace("&amp;", "&"), type="video"))
+
+        return Post(platform="telegram", text=text, media=media)
