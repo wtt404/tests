@@ -34,7 +34,12 @@ class TelegramFetcher(Fetcher):
         soup = BeautifulSoup(body, "html.parser")
 
         text_el = soup.select_one(".tgme_widget_message_text")
-        text = text_el.get_text("\n").strip() if text_el else ""
+
+        text = ""
+        if text_el:
+            for br in text_el.find_all("br"):
+                br.replace_with("\n")
+            text = text_el.get_text().strip()
 
         seen = set()
         media = []
