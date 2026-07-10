@@ -46,17 +46,29 @@ class XFetcher(Fetcher):
             except Exception:
                 pass  # text-only tweet, nothing to wait for
 
-            # X frequently doesn't fetch the actual video manifest until
-            # playback starts, so it's often just not present in the static
-            # HTML at all. Nudge the player and give the network request a
-            # moment to fire; we're listening for it via page.on("response").
+            # The page shows the whole thread (target tweet + replies +
+            # recommended tweets), not just the linked tweet. Scope
+            # everything to the target tweet's own container so media from
+            # replies/recommendations below it can't leak into the result.
+            article = page.locator('article[data-testid="tweet"]').first
+
+            has_target_video = False
             try:
-                video_el = page.locator("video").first
-                if await video_el.count() > 0:
-                    await video_el.click(timeout=3000)
-                    await page.wait_for_timeout(1500)
+                has_target_video = await article.locator("video").count() > 0
             except Exception:
                 pass
+
+            if has_target_video:
+                try:
+                    await article.locator("video").first.click(timeout=3000)
+                    await page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+            else:
+                # No video in the target tweet itself - discard anything the
+                # global network listener picked up, since it can only have
+                # come from something else on the page.
+                captured_video_urls.clear()
 
             scripts = await page.locator('script[type="application/ld+json"]').all_inner_texts()
 
@@ -73,19 +85,24 @@ class XFetcher(Fetcher):
                 raise RuntimeError("SocialMediaPosting not found")
 
             text = data["articleBody"]
-            html = await page.content()
+
+            try:
+                scoped_html = await article.inner_html()
+            except Exception:
+                scoped_html = await page.content()  # best-effort fallback
+
             video_urls = set(re.findall(
                 r'https://video\.twimg\.com[^"\']+',
-                html
+                scoped_html
             ))
-            video_urls |= captured_video_urls
+            video_urls |= captured_video_urls if has_target_video else set()
 
             print("Video playlists:", video_urls, flush=True)
   
             seen = set()
             media = []
 
-            for media_url in re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', html):
+            for media_url in re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', scoped_html):
                 media_url = media_url.replace("&amp;", "&")
 
                 if "?format=webp" in media_url:
