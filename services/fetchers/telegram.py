@@ -21,7 +21,16 @@ class TelegramFetcher(Fetcher):
         channel, msg_id = match.groups()
         embed_url = f"https://t.me/{channel}/{msg_id}?embed=1&mode=tme"
 
-        async with aiohttp.ClientSession() as session:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(embed_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"Telegram returned status {resp.status}")
