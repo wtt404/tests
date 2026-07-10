@@ -9,6 +9,14 @@ class XFetcher(Fetcher):
     async def fetch(self, url: str) -> Post:
 
         page = await new_page()
+        captured_video_urls = set()
+
+        def _capture_video(response):
+            resp_url = response.url
+            if "video.twimg.com" in resp_url and (".m3u8" in resp_url or ".mp4" in resp_url):
+                captured_video_urls.add(resp_url)
+
+        page.on("response", _capture_video)
 
         try:
             print("FETCH START", flush=True)
@@ -38,6 +46,18 @@ class XFetcher(Fetcher):
             except Exception:
                 pass  # text-only tweet, nothing to wait for
 
+            # X frequently doesn't fetch the actual video manifest until
+            # playback starts, so it's often just not present in the static
+            # HTML at all. Nudge the player and give the network request a
+            # moment to fire; we're listening for it via page.on("response").
+            try:
+                video_el = page.locator("video").first
+                if await video_el.count() > 0:
+                    await video_el.click(timeout=3000)
+                    await page.wait_for_timeout(1500)
+            except Exception:
+                pass
+
             scripts = await page.locator('script[type="application/ld+json"]').all_inner_texts()
 
             data = None
@@ -54,46 +74,46 @@ class XFetcher(Fetcher):
 
             text = data["articleBody"]
             html = await page.content()
-            video_urls = re.findall(
+            video_urls = set(re.findall(
                 r'https://video\.twimg\.com[^"\']+',
                 html
-            )
+            ))
+            video_urls |= captured_video_urls
 
-            print(video_urls, flush=True) 
             print("Video playlists:", video_urls, flush=True)
   
             seen = set()
             media = []
 
-            for url in re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', html):
-                url = url.replace("&amp;", "&")
+            for media_url in re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', html):
+                media_url = media_url.replace("&amp;", "&")
 
-                if "?format=webp" in url:
+                if "?format=webp" in media_url:
                     continue
 
-                if url in seen:
+                if media_url in seen:
                     continue
        
-                seen.add(url)
+                seen.add(media_url)
 
                 media.append(
                     Media(
-                        url=url,
+                        url=media_url,
                         type="image"
                     )
                 )
 
-            for url in video_urls:
-                url=url.replace("&amp;", "&") 
+            for video_url in video_urls:
+                video_url = video_url.replace("&amp;", "&")
 
-                if url in seen:
+                if video_url in seen:
                     continue 
 
-                seen.add(url)
+                seen.add(video_url)
 
                 media.append(
                     Media(
-                        url=url,
+                        url=video_url,
                         type="video"
                     )
                 )
@@ -105,4 +125,5 @@ class XFetcher(Fetcher):
             )
 
         finally:
+            page.remove_listener("response", _capture_video)
             await page.close()
