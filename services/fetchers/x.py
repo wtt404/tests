@@ -102,7 +102,11 @@ class XFetcher(Fetcher):
             seen = set()
             media = []
 
-            for media_url in re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', scoped_html):
+            image_matches = re.findall(r'https://pbs\.twimg\.com/media/[^"\']+', scoped_html)
+            print(f"Found {len(image_matches)} raw image URL matches in scoped article", flush=True)
+            print("Image matches:", image_matches, flush=True)
+
+            for media_url in image_matches:
                 media_url = media_url.replace("&amp;", "&")
 
                 if "?format=webp" in media_url:
