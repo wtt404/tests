@@ -5,3 +5,4 @@ lingua-language-detector
 playwright
 deep-translator
 aiohttp
+beautifulsoup4
