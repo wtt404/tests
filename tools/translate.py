@@ -2,6 +2,7 @@ from google.genai import types
 from deep_translator import DeeplTranslator
 from ai.client import client
 from config import settings
+from tools.base import Tool
 
 MODEL = "gemini-2.5-flash"
 
@@ -18,9 +19,19 @@ Rules:
 - Output only the translation.
 """
 
-class TranslateTool:
+class TranslateTool(Tool):
     name = "translate"
-    description = "Translate text."
+    description = "Translate a piece of text into the server's configured target language."
+    parameters_json_schema = {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "The text to translate.",
+            },
+        },
+        "required": ["text"],
+    }
 
     async def execute(self, text: str):
         try:
