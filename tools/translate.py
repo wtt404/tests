@@ -1,5 +1,5 @@
 from google.genai import types
-from deep_translator import DeeplTranslator
+from deep_translator import GoogleTranslator
 from ai.client import client
 from config import settings
 from tools.base import Tool
@@ -51,13 +51,13 @@ class TranslateTool(Tool):
             print("Gemini failed:", e, flush=True)
 
         try:
-            translated = DeeplTranslator(
+            translated = GoogleTranslator(
                 source="auto",
-                target="en"
+                target=settings.TARGET_LANGUAGE.lower()
             ).translate(text)
 
             return translated
 
         except Exception as e:
-            print("DeepL failed:", e, flush=True)
+            print("GoogleTranslator failed:", e, flush=True)
             return None
