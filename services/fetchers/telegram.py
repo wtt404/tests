@@ -1,26 +1,12 @@
 import re
-import html
 import aiohttp
+from bs4 import BeautifulSoup
 
 from models.post import Post, Media
 from services.fetchers.base import Fetcher
 
 URL_PATTERN = re.compile(r"t\.me/(?:s/)?([A-Za-z0-9_]+)/(\d+)")
-
-TEXT_PATTERN = re.compile(
-    r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
-    re.DOTALL
-)
-PHOTO_PATTERN = re.compile(
-    r'tgme_widget_message_photo_wrap"[^>]*style="[^"]*background-image:url\(\'([^\']+)\'\)'
-)
-VIDEO_PATTERN = re.compile(r'<video[^>]+src="([^"]+)"')
-
-
-def _clean_text(raw: str) -> str:
-    text = re.sub(r"<br\s*/?>", "\n", raw)
-    text = re.sub(r"<[^>]+>", "", text)
-    return html.unescape(text).strip()
+BG_IMAGE_PATTERN = re.compile(r"background-image:url\('([^']+)'\)")
 
 
 class TelegramFetcher(Fetcher):
@@ -45,14 +31,25 @@ class TelegramFetcher(Fetcher):
         if "tgme_widget_message" not in body:
             raise RuntimeError("Telegram post not found or channel is private")
 
-        text_match = TEXT_PATTERN.search(body)
-        text = _clean_text(text_match.group(1)) if text_match else ""
+        soup = BeautifulSoup(body, "html.parser")
+
+        text_el = soup.select_one(".tgme_widget_message_text")
+        text = text_el.get_text("\n").strip() if text_el else ""
 
         seen = set()
         media = []
 
-        for photo_url in PHOTO_PATTERN.findall(body):
-            photo_url = photo_url.replace("&amp;", "&")
+        # Photos are rendered as an element with a background-image inline
+        # style. Match on "class contains" rather than an exact class
+        # attribute, since Telegram often appends extra classes.
+        for el in soup.select('[class*="tgme_widget_message_photo_wrap"]'):
+            style = el.get("style", "")
+            m = BG_IMAGE_PATTERN.search(style)
+
+            if not m:
+                continue
+
+            photo_url = m.group(1).replace("&amp;", "&")
 
             if photo_url in seen:
                 continue
@@ -60,13 +57,21 @@ class TelegramFetcher(Fetcher):
             seen.add(photo_url)
             media.append(Media(url=photo_url, type="image"))
 
-        for video_url in VIDEO_PATTERN.findall(body):
-            video_url = video_url.replace("&amp;", "&")
+        # Videos: only recoverable when Telegram's lightweight preview embeds
+        # a direct <video src>. Larger/longer videos are intentionally not
+        # embedded by Telegram here and can't be recovered without the
+        # Telegram API/app - those will just come through with no video media.
+        for el in soup.select("video"):
+            src = el.get("src")
 
-            if video_url in seen:
+            if not src:
+                source = el.find("source")
+                src = source.get("src") if source else None
+
+            if not src or src in seen:
                 continue
 
-            seen.add(video_url)
-            media.append(Media(url=video_url, type="video"))
+            seen.add(src)
+            media.append(Media(url=src.replace("&amp;", "&"), type="video"))
 
         return Post(platform="telegram", text=text, media=media)
