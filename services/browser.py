@@ -14,7 +14,9 @@ async def start_browser():
         headless=True
     )
 
-    _context = await _browser.new_context()
+    _context = await _browser.new_context(
+        viewport={"width": 1920, "height": 1080}
+    )
 
 
 async def stop_browser():
