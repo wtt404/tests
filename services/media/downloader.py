@@ -8,10 +8,15 @@ from .video import get_best_mp4
 
 async def download(media_urls):
     files = []
+    video_sent = False
 
     async with aiohttp.ClientSession() as session:
         for item in media_urls:
             url = item.url
+
+            if item.type == "video" and video_sent:
+                continue  # one real video per post is enough; skip duplicate renditions
+
             if item.type == "video" and ".m3u8" in url:
                 video_path = await get_best_mp4(url)
 
@@ -29,6 +34,7 @@ async def download(media_urls):
                         filename=os.path.basename(video_path)
                     )
                 )
+                video_sent = True
 
                 continue
 
@@ -37,10 +43,26 @@ async def download(media_urls):
                     if resp.status != 200:
                         continue
 
+                    content_type = resp.headers.get("Content-Type", "")
                     data = await resp.read()
+
                     if len(data) > MAX_UPLOAD_SIZE:
                         print(f"Skipping {url}: exceeds upload limit", flush=True)
-                        continue 
+                        continue
+
+                    # Some captured "video" URLs turn out to be tiny
+                    # tracking/license-check responses, not real video
+                    # content. Reject anything that isn't plausibly a video.
+                    if item.type == "video":
+                        MIN_VIDEO_BYTES = 20 * 1024
+
+                        if len(data) < MIN_VIDEO_BYTES or not content_type.startswith("video/"):
+                            print(
+                                f"Skipping {url}: not real video content "
+                                f"(size={len(data)}, content-type={content_type})",
+                                flush=True
+                            )
+                            continue
 
                 clean_url = url.split("?")[0]
               
@@ -66,7 +88,10 @@ async def download(media_urls):
                         tmp.name,
                         filename=os.path.basename(clean_url)
                     )
-                ) 
+                )
+
+                if item.type == "video":
+                    video_sent = True
 
             except Exception as e:
                 import traceback
