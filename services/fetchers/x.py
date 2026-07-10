@@ -26,6 +26,18 @@ class XFetcher(Fetcher):
 
             print("Title:", await page.title(), flush=True)
 
+            # Multi-photo galleries render a beat after domcontentloaded fires;
+            # wait for at least one media element, then give the rest of the
+            # gallery a moment to finish attaching before we scrape the HTML.
+            try:
+                await page.wait_for_selector(
+                    '[data-testid="tweetPhoto"], video',
+                    timeout=8000
+                )
+                await page.wait_for_timeout(750)
+            except Exception:
+                pass  # text-only tweet, nothing to wait for
+
             scripts = await page.locator('script[type="application/ld+json"]').all_inner_texts()
 
             data = None
