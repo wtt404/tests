@@ -7,6 +7,25 @@ async def dispatch(message, result):
     if fetcher is None:
         return
 
-    post = await fetcher.fetch(result.url)
+    try:
+        post = await fetcher.fetch(result.url)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Fetch failed for {result.type} ({result.url}): {e}", flush=True)
+        await message.reply(
+            f"Couldn't fetch that {result.type} post: {e}",
+            mention_author=False
+        )
+        return
 
-    await translate_post(message, post)
+    try:
+        await translate_post(message, post)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"translate_post failed: {e}", flush=True)
+        await message.reply(
+            "Something went wrong while processing that post.",
+            mention_author=False
+        )
