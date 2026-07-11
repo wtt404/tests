@@ -1,8 +1,8 @@
 import discord
 
-def translation_embed(guild, text, language):
+def translation_embed(guild, text, language, media_failed=False):
     embed = discord.Embed(
-        description=text,
+        description=text or None,
         color=discord.Color.dark_theme()
     )
 
@@ -28,10 +28,18 @@ def translation_embed(guild, text, language):
     "pt": "Portuguese",
     }
 
-    embed.add_field(
-        name="Translated from",
-        value=LANGUAGES.get(language, language),
-        inline=False
-    )
+    if text:
+        embed.add_field(
+            name="Translated from",
+            value=LANGUAGES.get(language, language),
+            inline=False
+        )
+
+    if media_failed:
+        embed.add_field(
+            name="⚠️ Media",
+            value="Failed to send media due to its size.",
+            inline=False
+        )
 
     return embed
