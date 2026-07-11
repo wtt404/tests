@@ -15,8 +15,10 @@ async def translate_post(message, post):
     print("Language:", language, flush=True)
     print("Media:", post.media, flush=True)
 
+    media_failed_size = False
+
     if settings.DOWNLOAD_MEDIA:
-        files = await download(post.media)
+        files, media_failed_size = await download(post.media)
     else:
         files = []
     print(f"Files: {len(files)}", flush=True)
@@ -25,13 +27,20 @@ async def translate_post(message, post):
 
     embed = None
 
-    if translated:
+    if translated or media_failed_size:
         embed = translation_embed(
             message.guild,
             translated,
-            language
+            language,
+            media_failed=media_failed_size
         )
-    
+
+    if embed is None and not files:
+        # Nothing worth sending (English post, no translation needed, and
+        # no media came through) - don't attempt an empty Discord message.
+        print("Nothing to send.", flush=True)
+        return
+
     try:
         await message.reply(
             embed=embed,
