@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 
 from ai.agent import ai
+from services.ocr import ocr_image
 
 
 class AI(commands.Cog):
@@ -19,18 +20,35 @@ class AI(commands.Cog):
         print("Ai COMMAND")
         print("=" * 50)
 
-        images = []
-        for attachment in ctx.message.attachments:
-            if attachment.content_type and attachment.content_type.startswith("image/"):
-                image_bytes = await attachment.read()
-                images.append((image_bytes, attachment.content_type))
+        image_attachments = [
+            a for a in ctx.message.attachments
+            if a.content_type and a.content_type.startswith("image/")
+        ]
 
-        if not prompt and not images:
+        if not prompt and not image_attachments:
             await ctx.send("Give me a question, or attach an image for me to read.")
             return
 
+        ocr_text_parts = []
+
+        for attachment in image_attachments:
+            image_bytes = await attachment.read()
+            text = await ocr_image(image_bytes, filename=attachment.filename)
+
+            if text:
+                ocr_text_parts.append(text)
+
+        if image_attachments and not ocr_text_parts:
+            await ctx.send("I couldn't read any text from that image.")
+            return
+
+        full_prompt = prompt or "Translate the text found in the attached image."
+
+        if ocr_text_parts:
+            full_prompt += "\n\nText found in attached image(s):\n" + "\n---\n".join(ocr_text_parts)
+
         try:
-            reply = await ai(prompt or "", images=images)
+            reply = await ai(full_prompt.strip())
         except Exception as e:
             import traceback
             traceback.print_exc()
