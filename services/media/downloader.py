@@ -9,6 +9,7 @@ from .video import get_best_mp4
 async def download(media_urls):
     files = []
     video_sent = False
+    media_failed_size = False
 
     async with aiohttp.ClientSession() as session:
         for item in media_urls:
@@ -26,6 +27,7 @@ async def download(media_urls):
                 if os.path.getsize(video_path) > MAX_UPLOAD_SIZE:
                     print("Video exceeds upload limit", flush=True)
                     os.remove(video_path)
+                    media_failed_size = True
                     continue
 
                 files.append(
@@ -48,6 +50,7 @@ async def download(media_urls):
 
                     if len(data) > MAX_UPLOAD_SIZE:
                         print(f"Skipping {url}: exceeds upload limit", flush=True)
+                        media_failed_size = True
                         continue
 
                     # Some captured "video" URLs turn out to be tiny
@@ -99,4 +102,4 @@ async def download(media_urls):
                 print(f"Failed to download {url}: {e}", flush=True) 
 
 
-    return files
+    return files, media_failed_size
