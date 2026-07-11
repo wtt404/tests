@@ -1,8 +1,5 @@
-from google.genai import types
-from ai.client import client
+from ai.client import chat_completion
 from tools.base import Tool
-
-MODEL = "gemini-2.5-flash"
 
 SYSTEM_PROMPT = """
 You summarize text clearly and concisely.
@@ -30,14 +27,13 @@ class SummarizeTool(Tool):
 
     async def execute(self, text: str):
         try:
-            response = client.models.generate_content(
-                model=MODEL,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                ),
-                contents=text,
+            response = await chat_completion(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
             )
-            return response.text
+            return response.choices[0].message.content
         except Exception as e:
             print("Summarize failed:", e, flush=True)
             return None
