@@ -46,9 +46,18 @@ async def ai(message: str, images: list = None) -> str:
             contents=contents,
         )
 
+        print(f"finish_reason: {getattr(response.candidates[0], 'finish_reason', None) if response.candidates else 'no candidates'}", flush=True)
+
+        if not response.candidates:
+            feedback = getattr(response, "prompt_feedback", None)
+            print(f"No candidates returned. prompt_feedback={feedback}", flush=True)
+            return "I couldn't process that — it may have been blocked by a content filter."
+
         calls = response.function_calls
 
         if not calls:
+            if not response.text:
+                return "I couldn't come up with a text response for that."
             return response.text
 
         # Keep the model's own function-call turn in the conversation history.
