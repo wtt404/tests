@@ -22,12 +22,19 @@ def _build_tools():
     return [types.Tool(function_declarations=declarations)]
 
 
-async def ai(message: str) -> str:
+async def ai(message: str, images: list = None) -> str:
     tools = _build_tools()
 
-    contents = [
-        types.Content(role="user", parts=[types.Part.from_text(text=message)])
-    ]
+    parts = []
+
+    for image_bytes, mime_type in (images or []):
+        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+
+    parts.append(types.Part.from_text(
+        text=message or "Read any text in the attached image(s) and translate it."
+    ))
+
+    contents = [types.Content(role="user", parts=parts)]
 
     for _ in range(MAX_TOOL_TURNS):
         response = client.models.generate_content(
