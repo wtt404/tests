@@ -11,7 +11,7 @@ class AI(commands.Cog):
 
 
     @commands.command(name="ai")
-    async def ai(self, ctx, *, prompt):
+    async def ai(self, ctx, *, prompt: str = None):
         await ctx.typing()
         print(f"COMMAND {ctx.command} | message={ctx.message.id}", flush=True)
 
@@ -19,7 +19,21 @@ class AI(commands.Cog):
         print("Ai COMMAND")
         print("=" * 50)
 
-        reply = await ai(prompt)
+        images = []
+        for attachment in ctx.message.attachments:
+            if attachment.content_type and attachment.content_type.startswith("image/"):
+                image_bytes = await attachment.read()
+                images.append((image_bytes, attachment.content_type))
+
+        if not prompt and not images:
+            await ctx.send("Give me a question, or attach an image for me to read.")
+            return
+
+        reply = await ai(prompt or "", images=images)
+
+        if not reply:
+            await ctx.send("Sorry, I couldn't come up with a response.")
+            return
 
         if len(reply) > 2000:
             reply = reply[:1990] + "..."
