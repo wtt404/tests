@@ -29,7 +29,14 @@ class AI(commands.Cog):
             await ctx.send("Give me a question, or attach an image for me to read.")
             return
 
-        reply = await ai(prompt or "", images=images)
+        try:
+            reply = await ai(prompt or "", images=images)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"-ai command failed: {e}", flush=True)
+            await ctx.send(f"Something went wrong: {e}")
+            return
 
         if not reply:
             await ctx.send("Sorry, I couldn't come up with a response.")
