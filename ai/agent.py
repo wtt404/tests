@@ -1,91 +1,78 @@
-from google.genai import types
+import json
 
-from ai.client import client
+from ai.client import chat_completion
 from ai.prompts import SYSTEM_PROMPT
 from tools import TOOLS
 
 
-MODEL = "gemini-2.5-flash"
 MAX_TOOL_TURNS = 3
 
 
 def _build_tools():
-    declarations = [
-        types.FunctionDeclaration(
-            name=tool.name,
-            description=tool.description,
-            parameters_json_schema=tool.parameters_json_schema,
-        )
+    if not TOOLS:
+        return None
+
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters_json_schema,
+            },
+        }
         for tool in TOOLS.values()
     ]
 
-    return [types.Tool(function_declarations=declarations)]
 
-
-async def ai(message: str, images: list = None) -> str:
+async def ai(message: str) -> str:
     tools = _build_tools()
 
-    parts = []
-
-    for image_bytes, mime_type in (images or []):
-        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
-
-    parts.append(types.Part.from_text(
-        text=message or "Read any text in the attached image(s) and translate it."
-    ))
-
-    contents = [types.Content(role="user", parts=parts)]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": message},
+    ]
 
     for _ in range(MAX_TOOL_TURNS):
-        response = client.models.generate_content(
-            model=MODEL,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                tools=tools,
-            ),
-            contents=contents,
-        )
+        try:
+            response = await chat_completion(messages=messages, tools=tools)
+        except Exception as e:
+            print(f"All AI models failed: {e}", flush=True)
+            return "I couldn't reach any AI model right now — try again in a bit."
 
-        print(f"finish_reason: {getattr(response.candidates[0], 'finish_reason', None) if response.candidates else 'no candidates'}", flush=True)
+        if not response.choices:
+            print("No choices in response.", flush=True)
+            return "I couldn't come up with a response for that."
 
-        if not response.candidates:
-            feedback = getattr(response, "prompt_feedback", None)
-            print(f"No candidates returned. prompt_feedback={feedback}", flush=True)
-            return "I couldn't process that — it may have been blocked by a content filter."
+        msg = response.choices[0].message
 
-        calls = response.function_calls
+        if not msg.tool_calls:
+            return msg.content or "I couldn't come up with a text response for that."
 
-        if not calls:
-            if not response.text:
-                return "I couldn't come up with a text response for that."
-            return response.text
+        messages.append(msg.model_dump(exclude_none=True))
 
-        # Keep the model's own function-call turn in the conversation history.
-        contents.append(response.candidates[0].content)
+        for call in msg.tool_calls:
+            print(f"AI TOOL CALL: {call.function.name} args={call.function.arguments}", flush=True)
+            tool = TOOLS.get(call.function.name)
 
-        function_response_parts = []
-
-        for call in calls:
-            print(f"AI TOOL CALL: {call.name} args={call.args}", flush=True)
-            tool = TOOLS.get(call.name)
+            try:
+                args = json.loads(call.function.arguments or "{}")
+            except Exception:
+                args = {}
 
             if tool is None:
-                result = {"error": f"Unknown tool: {call.name}"}
+                result = f"Unknown tool: {call.function.name}"
             else:
                 try:
-                    output = await tool.execute(**(call.args or {}))
-                    result = {"result": output}
+                    result = await tool.execute(**args)
                 except Exception as e:
-                    print(f"Tool '{call.name}' failed:", e, flush=True)
-                    result = {"error": str(e)}
+                    print(f"Tool '{call.function.name}' failed:", e, flush=True)
+                    result = f"Error running tool: {e}"
 
-            function_response_parts.append(
-                types.Part.from_function_response(
-                    name=call.name,
-                    response=result,
-                )
-            )
-
-        contents.append(types.Content(role="tool", parts=function_response_parts))
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": str(result) if result is not None else "No result.",
+            })
 
     return "I tried using a tool a few times but couldn't finish that one — try rephrasing?"
