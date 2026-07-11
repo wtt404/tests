@@ -28,6 +28,12 @@ async def on_ready():
         print(name, id(command), flush=True)
     print(bot.extensions.keys(), flush=True)
 
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} slash command(s)", flush=True)
+    except Exception as e:
+        print(f"Slash command sync failed: {e}", flush=True)
+
 
 async def load_cogs():
     for filename in os.listdir("cogs"):
