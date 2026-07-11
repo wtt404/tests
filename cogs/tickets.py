@@ -155,7 +155,7 @@ class CloseConfirmView(discord.ui.View):
         if log_channel:
             embed = discord.Embed(
                 title="Ticket Closed",
-                color=0xff0000
+                color=0x000000
             )
 
             embed.add_field(
@@ -220,7 +220,7 @@ class Tickets(commands.Cog):
         embed = discord.Embed(
             title="Support Tickets",
             description="Press the button below to create a ticket.",
-            color=0x16B25A
+            color=0x000000
         )
 
         await interaction.response.send_message(
