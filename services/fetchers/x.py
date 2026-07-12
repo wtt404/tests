@@ -113,12 +113,13 @@ class XFetcher(Fetcher):
                     continue
 
                 # X serves the same photo at several resolutions (grid
-                # thumbnail, hover/lazy-load preview, etc.), each a
-                # different URL (different "name=" size param) but the same
-                # underlying image. Dedupe on the stable media ID rather
-                # than the full URL so those collapse into one entry.
+                # thumbnail, hover/lazy-load preview, etc.), sometimes as a
+                # "?name=" query param and sometimes as a ":size" colon
+                # suffix (e.g. ABC123.jpg:large vs ABC123.jpg:small) - same
+                # underlying image either way. Dedupe on the stable media ID
+                # so those collapse into one entry instead of duplicating.
                 media_id = media_url.split("?")[0].rsplit("/", 1)[-1]
-                media_id = re.sub(r"\.(jpg|jpeg|png|webp|gif)$", "", media_id, flags=re.IGNORECASE)
+                media_id = re.sub(r"\.(jpg|jpeg|png|webp|gif)(:[a-zA-Z]+)?$", "", media_id, flags=re.IGNORECASE)
 
                 if media_id in seen:
                     continue
