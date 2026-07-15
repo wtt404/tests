@@ -1,4 +1,5 @@
 import aiohttp
+import time
 
 from config import OCR_SPACE_API_KEY
 
@@ -31,6 +32,7 @@ async def ocr_image(image_bytes: bytes, filename: str = "image.png") -> str:
     )
 
     try:
+        ocr_start = time.monotonic()
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 OCR_URL,
@@ -38,6 +40,7 @@ async def ocr_image(image_bytes: bytes, filename: str = "image.png") -> str:
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 result = await resp.json()
+        print(f"[TIMING] OCR.space request: {time.monotonic() - ocr_start:.2f}s", flush=True)
 
     except Exception as e:
         print("OCR.space request failed:", e, flush=True)
