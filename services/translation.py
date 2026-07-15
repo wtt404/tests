@@ -1,55 +1,47 @@
-from deep_translator import GoogleTranslator
-
 from ai.client import chat_completion, looks_like_refusal
-from config import settings
+from tools.base import Tool
 
-SYSTEM_PROMPT = f"""
-You are a professional translator.
-
-Translate the user's text into {settings.TARGET_LANGUAGE}.
+SYSTEM_PROMPT = """
+You summarize text clearly and concisely.
 
 Rules:
-- Preserve the original meaning.
-- Preserve formatting.
-- Do not add explanations.
-- Do not summarize.
-- Output only the translation.
+- Keep it short - a few sentences, unless the user explicitly asks for more detail.
+- Preserve the key facts, names, numbers, and claims. Do not lose specifics.
+- Do not add opinions or information not present in the original text.
+- Do not pad with filler phrases like "This text discusses..." - get straight to the content.
 """
 
+class SummarizeTool(Tool):
+    name = "summarize"
+    description = "Summarize a piece of text concisely, preserving key facts."
+    parameters_json_schema = {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "The text to summarize.",
+            },
+        },
+        "required": ["text"],
+    }
 
-async def translate(text: str) -> str:
-    # Primary: AI translation via OpenRouter's fallback chain.
-    try:
-        response = await chat_completion(
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ],
-        )
-        choice = response.choices[0]
-        result = choice.message.content
-        finish_reason = getattr(choice, "finish_reason", None)
+    async def execute(self, text: str):
+        try:
+            response = await chat_completion(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+            )
+            choice = response.choices[0]
+            result = choice.message.content
+            finish_reason = getattr(choice, "finish_reason", None)
 
-        if finish_reason == "content_filter":
-            print(f"AI translation blocked by content filter, falling back", flush=True)
-        elif result and not looks_like_refusal(text, result):
-            return result.strip()
-        elif result:
-            print(f"AI translation looked like a refusal, falling back: {result[:200]}", flush=True)
+            if finish_reason == "content_filter" or (result and looks_like_refusal(text, result)):
+                print(f"Summarize looked like a refusal: {(result or '')[:200]}", flush=True)
+                return "Couldn't summarize that (the model declined to process it)."
 
-    except Exception as e:
-        print("AI translation failed:", e, flush=True)
-
-    # Fallback: GoogleTranslator, free and keyless, used whenever the AI
-    # path failed or refused.
-    try:
-        translated = GoogleTranslator(
-            source="auto",
-            target=settings.TARGET_LANGUAGE.lower()
-        ).translate(text)
-
-        return translated
-
-    except Exception as e:
-        print("GoogleTranslator failed:", e, flush=True)
-        return None
+            return result
+        except Exception as e:
+            print("Summarize failed:", e, flush=True)
+            return None
