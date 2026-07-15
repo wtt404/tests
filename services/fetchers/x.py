@@ -3,10 +3,12 @@ from services.browser import new_page
 from services.fetchers.base import Fetcher
 import json
 import re
+import time
 
 
 class XFetcher(Fetcher):
     async def fetch(self, url: str) -> Post:
+        fetch_start = time.monotonic()
 
         page = await new_page()
         captured_video_urls = set()
@@ -150,6 +152,9 @@ class XFetcher(Fetcher):
                     )
                 )
 
+            elapsed = time.monotonic() - fetch_start
+            print(f"[TIMING] XFetcher.fetch succeeded in {elapsed:.2f}s", flush=True)
+
             return Post(
                 platform="x",
                 text=text,
@@ -157,5 +162,7 @@ class XFetcher(Fetcher):
             )
 
         finally:
+            elapsed = time.monotonic() - fetch_start
+            print(f"[TIMING] XFetcher.fetch total (incl. cleanup): {elapsed:.2f}s", flush=True)
             page.remove_listener("response", _capture_video)
             await page.close()
