@@ -1,4 +1,5 @@
 import re
+import time
 import aiohttp
 from bs4 import BeautifulSoup
 
@@ -11,6 +12,7 @@ BG_IMAGE_PATTERN = re.compile(r"background-image:url\('([^']+)'\)")
 
 class TelegramFetcher(Fetcher):
     async def fetch(self, url: str) -> Post:
+        fetch_start = time.monotonic()
         match = URL_PATTERN.search(url)
 
         if not match:
@@ -103,5 +105,8 @@ class TelegramFetcher(Fetcher):
 
             seen.add(src)
             media.append(Media(url=src.replace("&amp;", "&"), type="video"))
+
+        elapsed = time.monotonic() - fetch_start
+        print(f"[TIMING] TelegramFetcher.fetch: {elapsed:.2f}s", flush=True)
 
         return Post(platform="telegram", text=text, media=media)
