@@ -1,3 +1,5 @@
+import time
+
 from openai import AsyncOpenAI
 
 from config import OPENROUTER_API_KEY
@@ -25,6 +27,7 @@ FALLBACK_MODELS = [
 async def chat_completion(messages, tools=None, **kwargs):
     """Try each fallback model in order, returning the first success."""
     last_error = None
+    overall_start = time.monotonic()
 
     for model in FALLBACK_MODELS:
         try:
@@ -32,15 +35,23 @@ async def chat_completion(messages, tools=None, **kwargs):
             if tools:
                 kwargs_with_tools["tools"] = tools
 
+            attempt_start = time.monotonic()
+
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 **kwargs_with_tools,
             )
+
+            elapsed = time.monotonic() - attempt_start
+            total = time.monotonic() - overall_start
+            print(f"[TIMING] chat_completion: model='{model}' succeeded in {elapsed:.2f}s (total {total:.2f}s)", flush=True)
+
             return response
 
         except Exception as e:
-            print(f"Model '{model}' failed: {e}", flush=True)
+            elapsed = time.monotonic() - attempt_start
+            print(f"[TIMING] chat_completion: model='{model}' failed after {elapsed:.2f}s: {e}", flush=True)
             last_error = e
             continue
 
