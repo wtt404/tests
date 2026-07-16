@@ -7,20 +7,26 @@ from config import OPENROUTER_API_KEY
 client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
-    timeout=20.0,  # fail fast into the next fallback model instead of the
+    timeout=15.0,  # fail fast into the next fallback model instead of the
                    # SDK's 10-minute default - a hung request shouldn't make
                    # every feature in the bot feel slow.
+    max_retries=0,  # we already retry across models ourselves below; the
+                     # SDK's own default (2 retries) was silently retrying
+                     # the SAME already-rate-limited model 2-3 times before
+                     # our fallback loop ever got a turn, turning a ~2s
+                     # rejection into a 40+ second wait.
 )
 
-# Tried in order. A pinned, known-fast free model goes first for the common
-# case. "openrouter/free" (OpenRouter's own auto-router) goes second as a
-# resilience backup - it has its own model-selection overhead on every call,
-# so trying it first meant paying that cost even when everything is healthy.
-# It still matters as a backup since the free model lineup on OpenRouter
-# rotates often (models get pulled or rate-limited without notice).
+# Tried in order. "openrouter/free" (OpenRouter's own auto-router) goes
+# first - real timing data showed it succeeding in ~11s while a specific
+# pinned model was actively rate-limited upstream and took 44s+ to fail.
+# Free models on OpenRouter get rate-limited/pulled unpredictably, so
+# rather than gamble on a static order, the auto-router (which picks
+# whatever's currently healthy) goes first, with a pinned model as backup
+# in case the auto-router itself has an issue.
 FALLBACK_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
     "openrouter/free",
+    "meta-llama/llama-3.3-70b-instruct:free",
 ]
 
 
