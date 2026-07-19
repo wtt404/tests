@@ -30,4 +30,3 @@ jobs:
       - run: python -u main.py
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
