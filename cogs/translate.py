@@ -38,7 +38,6 @@ class Translate(commands.Cog):
             await dispatch(adapter, detected)
             return
 
-        # Plain text: translate it directly.
         from services.language import detect_language
         from services.translation import translate as translate_text
         from services.embeds import translation_embed
