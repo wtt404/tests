@@ -4,8 +4,6 @@ from discord import app_commands
 
 
 class InteractionReplyAdapter:
-    """Lets services.dispatcher/pipeline (built around discord.Message.reply)
-    be reused unchanged from a slash command's Interaction."""
 
     def __init__(self, interaction: discord.Interaction):
         self._interaction = interaction
@@ -36,7 +34,6 @@ class Translate(commands.Cog):
         detected = detect(text)
 
         if detected:
-            # An X/Telegram link was pasted: reuse the normal fetch + media pipeline.
             adapter = InteractionReplyAdapter(interaction)
             await dispatch(adapter, detected)
             return
