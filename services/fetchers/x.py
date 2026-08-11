@@ -1,13 +1,113 @@
+import json
+import math
+import re
+import time
+
+import aiohttp
+
 from models.post import Post, Media
 from services.browser import new_page, page_semaphore
 from services.fetchers.base import Fetcher
-import json
-import re
-import time
+
+SYNDICATION_URL = "https://cdn.syndication.twimg.com/tweet-result"
+
+
+def _get_token(tweet_id: str) -> str:
+    value = (int(tweet_id) / 1e15) * math.pi
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+    n = int(value)
+    frac = value - n
+
+    int_str = "" if n else "0"
+    while n > 0:
+        int_str = digits[n % 36] + int_str
+        n //= 36
+
+    frac_str = ""
+    for _ in range(12):
+        frac *= 36
+        d = int(frac)
+        frac_str += digits[d]
+        frac -= d
+        if frac <= 1e-9:
+            break
+
+    token = int_str + frac_str
+    return re.sub(r"(0+|\.)", "", token)
 
 
 class XFetcher(Fetcher):
     async def fetch(self, url: str) -> Post:
+        status_match = re.search(r"/status/(\d+)", url)
+        status_id = status_match.group(1) if status_match else None
+
+        if status_id:
+            syndication_start = time.monotonic()
+            try:
+                post = await self._fetch_via_syndication(status_id)
+                print(f"[TIMING] Syndication fetch succeeded in {time.monotonic() - syndication_start:.2f}s", flush=True)
+                return post
+            except Exception as e:
+                print(f"Syndication fetch failed ({e}), falling back to browser scraping", flush=True)
+
+        return await self._fetch_via_browser(url)
+
+    async def _fetch_via_syndication(self, status_id: str) -> Post:
+        token = _get_token(status_id)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                SYNDICATION_URL,
+                params={"id": status_id, "token": token, "lang": "en"},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"Syndication endpoint returned status {resp.status}")
+
+                data = await resp.json()
+
+        text = data.get("text")
+
+        if not text:
+            raise RuntimeError("Syndication response missing tweet text")
+
+        seen = set()
+        media = []
+
+        for photo in data.get("mediaDetails", []) or data.get("photos", []):
+            photo_url = photo.get("media_url_https") or photo.get("url")
+
+            if not photo_url or photo_url in seen:
+                continue
+
+            if photo.get("type") not in (None, "photo"):
+                continue
+
+            seen.add(photo_url)
+            media.append(Media(url=photo_url, type="image"))
+
+        video = data.get("video")
+
+        if video:
+            variants = [
+                v for v in video.get("variants", [])
+                if v.get("type") == "video/mp4" and v.get("src")
+            ]
+
+            if variants:
+                best = max(variants, key=lambda v: v.get("bitrate", 0))
+
+                if best["src"] not in seen:
+                    seen.add(best["src"])
+                    media.append(Media(url=best["src"], type="video"))
+
+        print(f"Syndication media: {media}", flush=True)
+
+        return Post(platform="x", text=text, media=media)
+
+    async def _fetch_via_browser(self, url: str) -> Post:
         fetch_start = time.monotonic()
 
         async with page_semaphore():
@@ -53,7 +153,26 @@ class XFetcher(Fetcher):
                     pass  # text-only tweet, nothing to wait for
                 print(f"[TIMING] Render wait: {time.monotonic() - render_wait_start:.2f}s", flush=True)
 
-                article = page.locator('article[data-testid="tweet"]').first
+                status_match = re.search(r"/status/(\d+)", url)
+                status_id = status_match.group(1) if status_match else None
+
+                article = None
+                if status_id:
+                    try:
+                        status_link = page.locator(f'a[href*="/status/{status_id}"]').first
+                        await status_link.wait_for(state="attached", timeout=5000)
+                        candidate = page.locator(
+                            f'article[data-testid="tweet"]:has(a[href*="/status/{status_id}"])'
+                        ).first
+                        if await candidate.count() > 0:
+                            article = candidate
+                            print(f"Scoped to article matching status ID {status_id}", flush=True)
+                    except Exception as e:
+                        print(f"Status ID match wait failed: {e}", flush=True)
+
+                if article is None:
+                    print("Falling back to first article (couldn't match status ID in DOM)", flush=True)
+                    article = page.locator('article[data-testid="tweet"]').first
 
                 has_target_video = False
                 try:
@@ -83,11 +202,12 @@ class XFetcher(Fetcher):
 
                 text = None
                 method_used = None
+                text_extract_start = time.monotonic()
 
                 try:
                     tweet_text_el = article.locator('[data-testid="tweetText"]').first
                     if await tweet_text_el.count() > 0:
-                        dom_text = await tweet_text_el.inner_text()
+                        dom_text = await tweet_text_el.inner_text(timeout=3000)
                         if dom_text and dom_text.strip():
                             text = dom_text.strip()
                             method_used = "dom"
@@ -118,12 +238,12 @@ class XFetcher(Fetcher):
                 if text is None:
                     raise RuntimeError("Could not extract tweet text via any method")
 
-                print(f"Text extraction method: {method_used}", flush=True)
+                print(f"Text extraction method: {method_used} ({time.monotonic() - text_extract_start:.2f}s)", flush=True)
 
                 try:
-                    scoped_html = await article.inner_html()
+                    scoped_html = await article.inner_html(timeout=3000)
                 except Exception:
-                    scoped_html = await page.content() 
+                    scoped_html = await page.content()
 
                 video_urls = set(re.findall(
                     r'https://video\.twimg\.com[^"\']+',
@@ -154,12 +274,7 @@ class XFetcher(Fetcher):
 
                     seen.add(media_id)
 
-                    media.append(
-                        Media(
-                            url=media_url,
-                            type="image"
-                        )
-                    )
+                    media.append(Media(url=media_url, type="image"))
 
                 for video_url in video_urls:
                     video_url = video_url.replace("&amp;", "&")
@@ -171,24 +286,15 @@ class XFetcher(Fetcher):
 
                     seen.add(video_id)
 
-                    media.append(
-                        Media(
-                            url=video_url,
-                            type="video"
-                        )
-                    )
+                    media.append(Media(url=video_url, type="video"))
 
                 elapsed = time.monotonic() - fetch_start
-                print(f"[TIMING] XFetcher.fetch succeeded in {elapsed:.2f}s", flush=True)
+                print(f"[TIMING] XFetcher.fetch (browser) succeeded in {elapsed:.2f}s", flush=True)
 
-                return Post(
-                    platform="x",
-                    text=text,
-                    media=media
-                )
+                return Post(platform="x", text=text, media=media)
 
             finally:
                 elapsed = time.monotonic() - fetch_start
-                print(f"[TIMING] XFetcher.fetch total (incl. cleanup): {elapsed:.2f}s", flush=True)
+                print(f"[TIMING] XFetcher.fetch (browser) total (incl. cleanup): {elapsed:.2f}s", flush=True)
                 page.remove_listener("response", _capture_video)
                 await page.close()
