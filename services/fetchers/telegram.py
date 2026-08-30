@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from models.post import Post, Media
 from services.fetchers.base import Fetcher
 
-URL_PATTERN = re.compile(r"t\.me/(?:s/)?([A-Za-z0-9_]+)/(\d+)")
+URL_PATTERN = re.compile(r"(?:t\.me|telegram\.dog)/(?:s/)?([A-Za-z0-9_]+)/(\d+)")
 BG_IMAGE_PATTERN = re.compile(r"background-image:url\('([^']+)'\)")
 
 
